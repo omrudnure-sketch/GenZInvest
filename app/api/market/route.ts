@@ -64,12 +64,23 @@ export async function GET() {
                     }
                 }
 
-                // Refinining change detection:
-                // Google Finance puts percentage in a bracket sometimes or just as text.
-                // Regex for signed percentage: ([-+]\d+\.\d+%)
-                const robustChangeMatch = text.match(/([-+]\d+(?:\.\d+)?)%/);
-                if (robustChangeMatch) {
-                    change = robustChangeMatch[0];
+                // Refined Regex for Change Percent:
+                // Google Finance often puts the daily % change in a span with class "JwB6zf" or similar, 
+                // typically inside a container with class "V53LMb" or "P6K39c".
+                // We look for a percentage that matches reasonable daily market moves (e.g. -10% to +10%).
+                // The big "900%" errors usually come from matching Year-to-Date or 5-Year returns further down the page.
+
+                // Strategy: Find the price first (YMlKec), then look for the *immediate next* percentage.
+                const priceIndex = text.indexOf('class="YMlKec fxKbKc"');
+                change = "+0.00%";
+
+                if (priceIndex !== -1) {
+                    const snippet = text.substring(priceIndex, priceIndex + 1000); // Look in the next 1000 chars
+                    const pctMatch = snippet.match(/([-+]\d{1,2}\.\d{2})%/); // Match typical daily moves like +0.50%, -1.25%
+
+                    if (pctMatch) {
+                        change = `${pctMatch[1]}%`;
+                    }
                 }
 
                 return {
