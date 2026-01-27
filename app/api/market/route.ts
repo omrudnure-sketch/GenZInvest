@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import YahooFinance from 'yahoo-finance2';
+import { fetchGoogleFinanceData } from '@/lib/google-finance';
 
 const yahooFinance = new YahooFinance();
 
@@ -12,6 +13,19 @@ const INDICES = [
 export async function GET() {
     try {
         const promises = INDICES.map(async (index) => {
+            // STRATEGY 1: Google Finance Scraping (Primary)
+            try {
+                const googleData = await fetchGoogleFinanceData(index.symbol);
+                return {
+                    name: index.name,
+                    value: googleData.value,
+                    change: googleData.change
+                };
+            } catch (googleError) {
+                console.warn(`Google Finance failed for ${index.name}, falling back to Yahoo:`, googleError);
+            }
+
+            // STRATEGY 2: Yahoo Finance API (Fallback)
             try {
                 // 1. Try Quote API
                 const quote: any = await yahooFinance.quote(index.symbol);
@@ -65,7 +79,7 @@ export async function GET() {
                     change: changeStr
                 };
             } catch (err) {
-                console.error(`Failed to fetch ${index.name}:`, err);
+                console.error(`Failed to fetch ${index.name} from Yahoo:`, err);
                 return {
                     name: index.name,
                     value: 0,
@@ -85,7 +99,7 @@ export async function GET() {
         return NextResponse.json({
             indices: indicesData,
             status: "success",
-            source: "Yahoo Finance (Node.js + Historical Fallback)"
+            source: "Google Finance (Fallback: Yahoo)"
         });
 
     } catch (error) {
