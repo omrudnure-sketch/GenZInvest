@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
+
+const yahooFinance = new YahooFinance();
 
 const INDICES = [
     { name: "NIFTY 50", symbol: "^NSEI" },
@@ -11,19 +13,50 @@ export async function GET() {
     try {
         const promises = INDICES.map(async (index) => {
             try {
+                // 1. Try Quote API
                 const quote: any = await yahooFinance.quote(index.symbol);
-                const price = quote.regularMarketPrice;
-                const prevClose = quote.regularMarketPreviousClose;
-
-                // Calculate change explicitly if not provided
+                let price = quote.regularMarketPrice;
+                let prevClose = quote.regularMarketPreviousClose;
                 let changePct = quote.regularMarketChangePercent;
 
-                if (changePct === undefined && price !== undefined && prevClose !== undefined && prevClose !== 0) {
+                // 2. Fallback to Historical Data if crucial fields are missing
+                if (price === undefined || prevClose === undefined || changePct === undefined) {
+                    try {
+                        const endDate = new Date();
+                        const startDate = new Date();
+                        startDate.setDate(endDate.getDate() - 7); // Fetch last 7 days to be safe
+
+                        const history = await yahooFinance.historical(index.symbol, {
+                            period1: startDate.toISOString().split('T')[0],
+                            period2: endDate.toISOString().split('T')[0],
+                            interval: '1d'
+                        });
+
+                        if (history && history.length > 0) {
+                            // Latest available close
+                            const latest = history[history.length - 1];
+                            price = latest.close;
+
+                            // Previous close (second to last)
+                            if (history.length > 1) {
+                                prevClose = history[history.length - 2].close;
+                            } else {
+                                // If only 1 day history, maybe assume no change or use open?
+                                prevClose = latest.open; // fallback
+                            }
+                        }
+                    } catch (histErr) {
+                        console.error(`Historical fetch failed for ${index.symbol}`, histErr);
+                    }
+                }
+
+                // 3. Calculate Change explicitly if we have the numbers but no percentage
+                if ((changePct === undefined || changePct === 0) && price !== undefined && prevClose !== undefined && prevClose !== 0) {
                     changePct = ((price - prevClose) / prevClose) * 100;
                 }
 
+                // Format
                 const sign = (changePct !== undefined && changePct >= 0) ? "+" : "";
-                // Handle cases where changePct might still be undefined (though unlikely with valid price/prevClose)
                 const changeStr = (changePct !== undefined) ? `${sign}${changePct.toFixed(2)}%` : "0.00%";
 
                 return {
@@ -52,7 +85,7 @@ export async function GET() {
         return NextResponse.json({
             indices: indicesData,
             status: "success",
-            source: "Yahoo Finance (Node.js)"
+            source: "Yahoo Finance (Node.js + Historical Fallback)"
         });
 
     } catch (error) {
